@@ -12,7 +12,7 @@ export interface CompileOptions {
   target?: string;
   platform?: 'win' | 'macos' | 'linux' | 'alpine' | 'all';
   nodeVersion?: string;
-  assets?: string | string[]; // Додано опцію для активів
+  assets?: string | string[]; // Опція для активів
 }
 
 export async function compile(options: CompileOptions): Promise<void> {
@@ -29,10 +29,9 @@ export async function compile(options: CompileOptions): Promise<void> {
   console.log('Current working directory:', process.cwd());
   console.log('Entry point (raw):', entryPoint);
   
-  // Перевірте, чи існує файл
+  // Перевірка існування файлу
   const entryPointPath = path.resolve(entryPoint);
   console.log('Entry point (resolved):', entryPointPath);
-  
   if (!fs.existsSync(entryPointPath)) {
     console.error(`❌ Error: File not found: ${entryPointPath}`);
     throw new Error(`File not found: ${entryPointPath}`);
@@ -69,6 +68,7 @@ export async function compile(options: CompileOptions): Promise<void> {
   
   // Step 2: Copy assets if specified
   const assetsArray = typeof assets === 'string' ? [assets] : assets;
+  let hasAssets = false;
   
   if (assetsArray.length > 0) {
     console.log('📂 Copying assets...');
@@ -92,18 +92,71 @@ export async function compile(options: CompileOptions): Promise<void> {
       const assetStat = fs.statSync(assetPath);
       
       if (assetStat.isDirectory()) {
-        // Copy directory recursively
-        const assetDirName = path.basename(assetPath);
-        const targetDir = path.join(tempAssetsDir, assetDirName);
-        
-        copyDirectoryRecursive(assetPath, targetDir);
-        console.log(`✅ Directory copied: ${assetPath} -> ${targetDir}`);
+        // Для директорій копіюємо вміст безпосередньо в assets
+        copyDirectoryContents(assetPath, tempAssetsDir);
+        console.log(`✅ Directory contents copied: ${assetPath} -> ${tempAssetsDir}`);
+        hasAssets = true;
       } else {
         // Copy file
         const targetFile = path.join(tempAssetsDir, path.basename(assetPath));
         fs.copyFileSync(assetPath, targetFile);
         console.log(`✅ File copied: ${assetPath} -> ${targetFile}`);
+        hasAssets = true;
       }
+    }
+    
+    // Додаємо код для доступу до активів у бандл
+    if (hasAssets) {
+      console.log('📝 Adding asset helper code to bundle...');
+      const assetHelperCode = `
+// Asset helper functions
+if (!global.__assetAccessInitialized) {
+  global.__assetAccessInitialized = true;
+  const fs = require('fs');
+  const path = require('path');
+  
+  global.__readAsset = function(filename) {
+    try {
+      // Для pkg: шлях відносно виконуваного файлу
+      const pkgPath = path.join(path.dirname(process.execPath), 'assets', filename);
+      if (fs.existsSync(pkgPath)) {
+        return fs.readFileSync(pkgPath, 'utf-8');
+      }
+      
+      // Для pkg: альтернативний шлях
+      const pkgPath2 = path.join(process.cwd(), 'assets', filename);
+      if (fs.existsSync(pkgPath2)) {
+        return fs.readFileSync(pkgPath2, 'utf-8');
+      }
+      
+      // Для pkg: шлях відносно snapshot директорії
+      if (process.pkg) {
+        const snapshotPath = path.join('/snapshot/assets', filename);
+        if (fs.existsSync(snapshotPath)) {
+          return fs.readFileSync(snapshotPath, 'utf-8');
+        }
+      }
+      
+      // Для розробки: шлях відносно поточної директорії
+      const devPath = path.join(__dirname, 'assets', filename);
+      if (fs.existsSync(devPath)) {
+        return fs.readFileSync(devPath, 'utf-8');
+      }
+      
+      throw new Error('Asset file not found: ' + filename);
+    } catch (error) {
+      console.error('Error reading asset file ' + filename + ':', error);
+      throw error;
+    }
+  };
+}
+`;
+      
+      // Додаємо хелпер код до бандлу
+      const bundleContent = fs.readFileSync(bundleFile, 'utf-8');
+      fs.writeFileSync(bundleFile, assetHelperCode + bundleContent);
+      
+      console.log('✅ Asset helper code added to bundle');
     }
     
     console.log('✅ Assets copying complete');
@@ -124,12 +177,36 @@ export async function compile(options: CompileOptions): Promise<void> {
 
   const pkgTargetsStr = pkgTargets.join(',');
   
-  // Create assets option for pkg if assets are specified
-  const pkgAssetsOption = assetsArray.length > 0 ? `--assets "${tempDir}/assets/**/*"` : '';
+  // Покращена обробка активів для pkg
+  let pkgAssetsOption = '';
+  if (hasAssets) {
+    // Використовуємо правильний шлях для активів
+    pkgAssetsOption = `--assets "${tempDir}/assets/**/*"`;
+    
+    // Створюємо README файл для активів, щоб pkg правильно їх обробив
+    const readmePath = path.join(tempDir, 'assets', 'README.md');
+    fs.writeFileSync(readmePath, 'This directory contains assets for the application.');
+  }
   
   try {
-    await execAsync(`npx pkg ${bundleFile} --targets ${pkgTargetsStr} ${pkgAssetsOption} --output ${outFile}`);
+    // Виконуємо pkg з правильними опціями
+    const pkgCommand = `npx pkg ${bundleFile} --targets ${pkgTargetsStr} ${pkgAssetsOption} --output ${outFile}`;
+    console.log('Executing pkg command:', pkgCommand);
+    
+    await execAsync(pkgCommand);
     console.log(`✅ Executable created successfully: ${outFile}`);
+    
+    // Створюємо директорію assets поруч з виконуваним файлом
+    if (hasAssets) {
+      const exeAssetsDir = path.join(path.dirname(outFile), 'assets');
+      if (!fs.existsSync(exeAssetsDir)) {
+        fs.mkdirSync(exeAssetsDir, { recursive: true });
+      }
+      
+      // Копіюємо активи поруч з виконуваним файлом для додаткової надійності
+      copyDirectoryContents(path.join(tempDir, 'assets'), exeAssetsDir);
+      console.log(`✅ Assets copied to executable directory: ${exeAssetsDir}`);
+    }
   } catch (error) {
     console.error('❌ Error creating executable:', error);
     throw error;
@@ -141,6 +218,31 @@ export async function compile(options: CompileOptions): Promise<void> {
 
 // Helper function to copy directory recursively
 function copyDirectoryRecursive(source: string, target: string): void {
+  // Create target directory if it doesn't exist
+  if (!fs.existsSync(target)) {
+    fs.mkdirSync(target, { recursive: true });
+  }
+  
+  // Read source directory
+  const entries = fs.readdirSync(source, { withFileTypes: true });
+  
+  // Copy each entry
+  for (const entry of entries) {
+    const sourcePath = path.join(source, entry.name);
+    const targetPath = path.join(target, entry.name);
+    
+    if (entry.isDirectory()) {
+      // Recursively copy subdirectory
+      copyDirectoryRecursive(sourcePath, targetPath);
+    } else {
+      // Copy file
+      fs.copyFileSync(sourcePath, targetPath);
+    }
+  }
+}
+
+// Нова функція для копіювання вмісту директорії (без створення піддиректорії)
+function copyDirectoryContents(source: string, target: string): void {
   // Create target directory if it doesn't exist
   if (!fs.existsSync(target)) {
     fs.mkdirSync(target, { recursive: true });
@@ -178,11 +280,11 @@ Usage:
   ts-compiler-bin [options] <entry-file>
 
 Options:
-  --out, -o       Output file name (default: "output")
-  --target, -t    Node.js target version (default: "16")
-  --platform, -p  Target platform: win, macos, linux, alpine, all (default: current platform)
-  --assets, -a    Assets to include (can be specified multiple times)
-  --help, -h      Show this help message
+  --out, -o     Output file name (default: "output")
+  --target, -t  Node.js target version (default: "16")
+  --platform, -p Target platform: win, macos, linux, alpine, all (default: current platform)
+  --assets, -a  Assets to include (can be specified multiple times)
+  --help, -h    Show this help message
 
 Example:
   ts-compiler-bin -o my-app -a assets src/index.ts
