@@ -76,7 +76,7 @@ async function compile(options: CompileOptions): Promise<void> {
 }
 
 // CLI interface
-async function main() {
+export async function main() {
   const args = process.argv.slice(2);
   
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
@@ -140,8 +140,3 @@ Example:
 
 // Export the compile function for programmatic use
 export { compile, CompileOptions };
-
-// Run CLI if this file is executed directly
-if (require.main === module) {
-  main().catch(console.error);
-}
