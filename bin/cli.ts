@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 console.log('CLI script starting...');
 import { main } from '../src/index';
 
