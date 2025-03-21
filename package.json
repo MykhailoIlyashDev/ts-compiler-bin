@@ -1,0 +1,47 @@
+{
+  "name": "ts-compiler-bin",
+  "version": "1.0.0",
+  "description": "A lightweight tool that compiles TypeScript into a single executable binary",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ts-compiler-bin": "dist/bin/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/bin/cli.js"
+  },
+  "keywords": [
+    "typescript",
+    "compiler",
+    "binary",
+    "executable",
+    "bundle",
+    "pkg"
+  ],
+  "author": "Michael Ilyash",
+  "license": "MIT",
+  "dependencies": {
+    "esbuild": "^0.17.19",
+    "pkg": "^5.8.1",
+    "typescript": "^5.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^18.16.3"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+    "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MykhailoIlyashDev/ts-compiler-bin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MykhailoIlyashDev/ts-compiler-bin/issues"
+  },
+  "homepage": "https://github.com/MykhailoIlyashDev/ts-compiler-bin#readme"
+}
